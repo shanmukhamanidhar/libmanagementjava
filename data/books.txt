@@ -1,0 +1,10 @@
+# BOOK RECORDS (Format: TYPE;ID;TITLE;AUTHOR;CATEGORY;YEAR;AVAILABLE;EXTRA)
+STANDARD;B-101;Core Java: Fundamentals;Cay S. Horstmann;Computer Science;2024;false;N/A
+STANDARD;B-102;Java: The Complete Reference;Herbert Schildt;Computer Science;2023;false;N/A
+STANDARD;B-103;Effective Java;Joshua Bloch;Computer Science;2018;true;N/A
+STANDARD;B-104;Data Structures & Algorithms in Java;Robert Lafore;Computer Science;2021;true;N/A
+STANDARD;B-105;Operating System Concepts;Abraham Silberschatz;Computer Science;2020;true;N/A
+STANDARD;B-106;Introduction to Electrodynamics;David J. Griffiths;Physics;2017;true;N/A
+STANDARD;B-107;Higher Engineering Mathematics;B.S. Grewal;Mathematics;2022;true;N/A
+REF;REF-201;Oxford Advanced Learner's Dictionary;A.S. Hornby;General;2023;true;Reading Room Section R-1
+REF;REF-202;Encyclopaedia Britannica: Science & Tech;Britannica Editors;Science;2022;true;Reading Room Section R-2

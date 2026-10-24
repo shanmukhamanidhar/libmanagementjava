@@ -1,0 +1,6 @@
+# STUDENT RECORDS (Format: ID;NAME;DEPARTMENT;EMAIL;PHONE)
+24CS001;Aarav Sharma;CSE;aarav.s@college.edu;9876543210
+24CS002;Priya Venkatesh;CSE;priya.v@college.edu;9876543211
+24IT015;Rohan Verma;IT;rohan.v@college.edu;9876543212
+24EC032;Ananya Reddy;ECE;ananya.r@college.edu;9876543213
+25EU04119;S.Shanmukha Manidhar;CSE;25EU04119@siddhartha.edu.in;9848567819
