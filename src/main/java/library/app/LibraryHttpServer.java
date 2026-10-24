@@ -86,18 +86,14 @@ public class LibraryHttpServer {
     private class WebAppHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            String method = exchange.getRequestMethod();
+            if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
                 sendResponse(exchange, 405, "Method Not Allowed", "text/plain");
                 return;
             }
 
             String html = generateIndexHtml();
-            byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
-            exchange.sendResponseHeaders(200, bytes.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(bytes);
-            }
+            sendResponse(exchange, 200, html, "text/html");
         }
     }
 
@@ -1866,6 +1862,11 @@ Click any button above to execute live interactive demonstrations and view the o
     private void sendResponse(HttpExchange exchange, int statusCode, String responseText, String contentType) throws IOException {
         byte[] bytes = responseText.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", contentType + "; charset=UTF-8");
+        if ("HEAD".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(statusCode, -1);
+            exchange.close();
+            return;
+        }
         exchange.sendResponseHeaders(statusCode, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
