@@ -5,6 +5,8 @@ import library.operations.LibraryManager;
 
 import javax.swing.SwingUtilities;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -21,6 +23,9 @@ import java.util.function.Consumer;
  * 5. Swing Event Dispatch Thread (EDT) safety via SwingUtilities.invokeLater.
  */
 public class NotificationThread extends Thread {
+
+    // Thread-safe shared notification log buffer accessible to both Swing UI and Web Browser
+    private static final List<String> notificationHistory = Collections.synchronizedList(new ArrayList<>());
 
     private final LibraryManager manager;
     private final Consumer<String> uiNotificationCallback;
@@ -48,6 +53,29 @@ public class NotificationThread extends Thread {
 
         // Daemon thread ensures JVM shuts down smoothly when UI closes
         this.setDaemon(true);
+    }
+
+    /**
+     * Retrieves a snapshot copy of all recorded notification messages.
+     */
+    public static List<String> getNotificationHistory() {
+        synchronized (notificationHistory) {
+            return new ArrayList<>(notificationHistory);
+        }
+    }
+
+    /**
+     * Clears the shared notification history.
+     */
+    public static void clearNotificationHistory() {
+        notificationHistory.clear();
+    }
+
+    /**
+     * Programmatically appends an event to the shared notification history.
+     */
+    public static void logMessage(String message) {
+        notificationHistory.add(message);
     }
 
     /**
@@ -96,13 +124,14 @@ public class NotificationThread extends Thread {
     }
 
     /**
-     * Safely routes messages to the Swing Event Dispatch Thread (EDT).
+     * Safely routes messages to both the shared buffer and the Swing Event Dispatch Thread (EDT).
      * 
      * 24CS202 Unit IV Rule:
      * Never touch Swing UI components from an arbitrary background thread!
      * Always delegate through SwingUtilities.invokeLater.
      */
     private void dispatchMessage(String message) {
+        notificationHistory.add(message);
         if (uiNotificationCallback != null) {
             SwingUtilities.invokeLater(() -> uiNotificationCallback.accept(message));
         }

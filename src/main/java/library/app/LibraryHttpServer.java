@@ -8,6 +8,7 @@ import library.model.Book;
 import library.model.LoanRecord;
 import library.model.ReferenceBook;
 import library.model.Student;
+import library.notifications.NotificationThread;
 import library.operations.BookUnavailableException;
 import library.operations.LibraryManager;
 import library.reports.LibraryReport;
@@ -16,22 +17,19 @@ import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Enhanced Embedded Standard Java HTTP Server (Java 23 Standard Library)
+ * High-Fidelity Embedded Web Server for 24CS202 Library Management System
  * 
- * Provides interactive localhost browser controls for:
- * 1. Book Management: Add, edit, delete, and search books.
- * 2. Student Management: Register, edit, delete, and search students.
- * 3. Issue & Return Desk: Issue books to students and process returns with live fine calculations.
- * 4. Reports & Analytics: View audit reports, category distributions, and run parallel stream benchmarks.
- * 5. Real-time Synchronization: Actions directly mutate the shared LibraryManager instance,
- *    triggering automatic persistence to text files and real-time refresh of the Swing desktop GUI.
+ * Recreates the complete Java Swing desktop interface (LibraryMainFrame) in the browser
+ * with identical styling, navigation tabs, forms, tables, metric cards, background
+ * notification monitor, reports, and interactive syllabus demonstrations.
+ * 
+ * Powered by pure standard Java (com.sun.net.httpserver) with ZERO external dependencies.
  */
 public class LibraryHttpServer {
 
@@ -48,26 +46,29 @@ public class LibraryHttpServer {
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
-        
-        // Web Page Endpoints
-        server.createContext("/", new MainPortalHandler());
-        server.createContext("/syllabus", new SyllabusHandler());
 
-        // Book Management Form Actions
-        server.createContext("/books/add", new AddBookHandler());
-        server.createContext("/books/edit", new EditBookHandler());
-        server.createContext("/books/delete", new DeleteBookHandler());
+        // Core UI Page
+        server.createContext("/", new WebAppHandler());
 
-        // Student Management Form Actions
-        server.createContext("/students/add", new AddStudentHandler());
-        server.createContext("/students/edit", new EditStudentHandler());
-        server.createContext("/students/delete", new DeleteStudentHandler());
+        // REST APIs
+        server.createContext("/api/data", new ApiDataHandler());
+        server.createContext("/api/books/add", new ApiAddBookHandler());
+        server.createContext("/api/books/update", new ApiUpdateBookHandler());
+        server.createContext("/api/books/delete", new ApiDeleteBookHandler());
+        server.createContext("/api/students/add", new ApiAddStudentHandler());
+        server.createContext("/api/students/update", new ApiUpdateStudentHandler());
+        server.createContext("/api/students/delete", new ApiDeleteStudentHandler());
+        server.createContext("/api/students/history", new ApiStudentHistoryHandler());
+        server.createContext("/api/loans/issue", new ApiIssueLoanHandler());
+        server.createContext("/api/loans/return", new ApiReturnLoanHandler());
+        server.createContext("/api/reports/audit", new ApiReportAuditHandler());
+        server.createContext("/api/reports/category", new ApiReportCategoryHandler());
+        server.createContext("/api/reports/benchmark", new ApiReportBenchmarkHandler());
+        server.createContext("/api/reports/backup", new ApiReportBackupHandler());
+        server.createContext("/api/syllabus/demo", new ApiSyllabusDemoHandler());
+        server.createContext("/api/notifications/clear", new ApiClearNotificationsHandler());
 
-        // Issue & Return Form Actions
-        server.createContext("/loans/issue", new IssueBookHandler());
-        server.createContext("/loans/return", new ReturnBookHandler());
-
-        server.setExecutor(null); // Default single-thread or internal pool
+        server.setExecutor(null);
         server.start();
         System.out.printf("Local Web Dashboard running at: http://localhost:%d/\n", port);
     }
@@ -79,730 +80,1800 @@ public class LibraryHttpServer {
     }
 
     // =========================================================================
-    // MAIN HTML PORTAL HANDLER (GET /)
+    // 1. MAIN APPLICATION HTML / CSS / JS HANDLER
     // =========================================================================
 
-    private class MainPortalHandler implements HttpHandler {
+    private class WebAppHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                sendRedirect(exchange, "/");
+                sendResponse(exchange, 405, "Method Not Allowed", "text/plain");
                 return;
             }
 
-            Map<String, String> qparams = parseQueryParams(exchange.getRequestURI());
-            String successMsg = qparams.get("msg");
-            String errorMsg = qparams.get("err");
-            String bookSearch = qparams.getOrDefault("bsearch", "").trim();
-            String catFilter = qparams.getOrDefault("bcat", "All").trim();
-            String stuSearch = qparams.getOrDefault("ssearch", "").trim();
-            String activeTab = qparams.getOrDefault("tab", "dashboard").trim();
-
-            LibraryReport.DashboardStats stats = report.getDashboardStats();
-            List<Book> books = manager.searchBooks(bookSearch, catFilter);
-            List<Student> students = manager.searchStudents(stuSearch);
-            List<LoanRecord> activeLoans = manager.getActiveLoans();
-            List<Student> allStudents = manager.getAllStudents();
-            List<Book> allBooks = manager.getAllBooks();
-
-            StringBuilder h = new StringBuilder();
-            h.append("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>");
-            h.append("<meta name='viewport' content='width=device-width, initial-scale=1.0'>");
-            h.append("<title>24CS202 Library Management System - Localhost Web Portal</title>");
-            h.append("<style>");
-            h.append(":root { --primary: #182b49; --accent: #2980b9; --green: #27ae60; --orange: #e67e22; --red: #e74c3c; --purple: #8e44ad; --bg: #f4f6f9; }");
-            h.append("* { box-sizing: border-box; }");
-            h.append("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: var(--bg); color: #2c3e50; }");
-            h.append(".navbar { background: var(--primary); color: white; padding: 14px 28px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }");
-            h.append(".navbar h1 { margin: 0; font-size: 19px; }");
-            h.append(".navbar-sub { font-size: 12px; color: #cbd5e1; }");
-            h.append(".badge-online { background: var(--green); color: white; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }");
-            h.append(".container { max-width: 1140px; margin: 20px auto; padding: 0 15px; }");
-            h.append(".tabs-bar { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; flex-wrap: wrap; }");
-            h.append(".tab-btn { background: white; border: 1px solid #cbd5e1; padding: 9px 18px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; color: #475569; display: inline-block; transition: all 0.2s; }");
-            h.append(".tab-btn:hover { background: #f1f5f9; color: var(--accent); }");
-            h.append(".tab-btn.active { background: var(--primary); color: white; border-color: var(--primary); }");
-            h.append(".alert-box { padding: 12px 18px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; font-weight: 500; }");
-            h.append(".alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }");
-            h.append(".alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }");
-            h.append(".cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 25px; }");
-            h.append(".card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; border-left: 4px solid var(--accent); }");
-            h.append(".card.green { border-color: var(--green); } .card.orange { border-color: var(--orange); } .card.red { border-color: var(--red); } .card.purple { border-color: var(--purple); }");
-            h.append(".card h3 { margin: 0 0 6px 0; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }");
-            h.append(".card .num { font-size: 26px; font-weight: 700; color: #1e293b; }");
-            h.append(".section { background: white; border-radius: 8px; padding: 22px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }");
-            h.append(".section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; flex-wrap: wrap; gap: 10px; }");
-            h.append(".section-header h2 { margin: 0; font-size: 18px; color: var(--primary); }");
-            h.append(".btn { display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: white; padding: 8px 14px; border-radius: 5px; text-decoration: none; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: opacity 0.2s; }");
-            h.append(".btn:hover { opacity: 0.9; }");
-            h.append(".btn-sm { padding: 4px 8px; font-size: 11px; }");
-            h.append(".btn-green { background: var(--green); } .btn-orange { background: var(--orange); } .btn-red { background: var(--red); } .btn-gray { background: #64748b; } .btn-purple { background: var(--purple); }");
-            h.append(".filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }");
-            h.append(".filter-bar input, .filter-bar select { padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 13px; }");
-            h.append("table { width: 100%; border-collapse: collapse; font-size: 13px; }");
-            h.append("th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #edf2f7; }");
-            h.append("th { background: #f8fafc; font-weight: 600; color: #475569; }");
-            h.append(".tag-avail { background: #dcfce7; color: #166534; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }");
-            h.append(".tag-issued { background: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }");
-            h.append(".tag-ref { background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }");
-            h.append(".grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }");
-            h.append(".form-group { margin-bottom: 14px; }");
-            h.append(".form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: #334155; }");
-            h.append(".form-group input, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 13px; }");
-            h.append(".modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }");
-            h.append(".modal { background: white; border-radius: 8px; width: 450px; max-width: 90%; padding: 22px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }");
-            h.append(".modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }");
-            h.append(".modal-header h3 { margin: 0; font-size: 16px; color: var(--primary); }");
-            h.append(".close-btn { font-size: 20px; font-weight: bold; cursor: pointer; color: #64748b; }");
-            h.append("pre { background: #1e293b; color: #f8fafc; padding: 15px; border-radius: 6px; font-family: monospace; font-size: 12px; overflow-x: auto; }");
-            h.append("</style></head><body>");
-
-            // Navigation Bar
-            h.append("<div class='navbar'>");
-            h.append("<div><h1>24CS202 Library Management System</h1>");
-            h.append("<div class='navbar-sub'>Java 23 & Swing Desktop with Synchronized Localhost Controls</div></div>");
-            h.append("<div><span class='badge-online'>LOCAL HOST 8080 CONNECTED</span></div>");
-            h.append("</div>");
-
-            h.append("<div class='container'>");
-
-            // Flash Messages
-            if (successMsg != null && !successMsg.isEmpty()) {
-                h.append("<div class='alert-box alert-success'>&#10004; ").append(escapeHtml(successMsg)).append("</div>");
+            String html = generateIndexHtml();
+            byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
             }
-            if (errorMsg != null && !errorMsg.isEmpty()) {
-                h.append("<div class='alert-box alert-error'>&#9888; ").append(escapeHtml(errorMsg)).append("</div>");
+        }
+    }
+
+    private String generateIndexHtml() {
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>24CS202 Library Management System - College Academic Project</title>
+    <style>
+        :root {
+            --header-bg: #182b49;
+            --page-bg: #f5f7fa;
+            --card-border: #dcdfe6;
+            --blue: #2980b9;
+            --green: #27ae60;
+            --orange: #d35400;
+            --purple: #8e44ad;
+            --red: #c0392b;
+            --text-dark: #2c3e50;
+            --text-muted: #6e7882;
+            --panel-border: #c8d2dc;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--page-bg);
+            color: var(--text-dark);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Header matching Swing headerPanel --- */
+        .app-header {
+            background-color: var(--header-bg);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #0f1c30;
+        }
+        .header-title-container h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: 0.3px;
+        }
+        .header-title-container p {
+            font-size: 13px;
+            color: #d2e1f5;
+            margin-top: 2px;
+        }
+        .policy-badge {
+            font-size: 12px;
+            color: #ffffff;
+            border: 1px solid #466eaa;
+            border-radius: 6px;
+            padding: 5px 12px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* --- Tabbed Navigation Bar --- */
+        .tabs-header {
+            background-color: #e9edf2;
+            display: flex;
+            border-bottom: 1px solid #cbd5e1;
+            padding: 0 15px;
+            overflow-x: auto;
+        }
+        .tab-button {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #475569;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s ease-in-out;
+        }
+        .tab-button:hover {
+            color: var(--header-bg);
+            background: rgba(255, 255, 255, 0.5);
+        }
+        .tab-button.active {
+            color: var(--header-bg);
+            font-weight: 700;
+            border-bottom-color: var(--blue);
+            background: #ffffff;
+        }
+
+        /* --- Main Content Container --- */
+        .tab-content {
+            flex: 1;
+            padding: 20px;
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+
+        /* --- Dashboard Tab Layout --- */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 900px) {
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 600px) {
+            .metrics-grid { grid-template-columns: 1fr; }
+        }
+        .metric-card {
+            background: #ffffff;
+            border: 1px solid var(--card-border);
+            border-radius: 4px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            position: relative;
+            overflow: hidden;
+        }
+        .metric-strip {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+        }
+        .metric-body {
+            margin-left: 6px;
+        }
+        .metric-title {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .metric-value {
+            font-size: 26px;
+            font-weight: 700;
+        }
+
+        .dashboard-bottom-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        @media (max-width: 850px) {
+            .dashboard-bottom-grid { grid-template-columns: 1fr; }
+        }
+
+        /* --- Titled Border Panels (Swing-style) --- */
+        .titled-panel {
+            background: #ffffff;
+            border: 1px solid var(--panel-border);
+            border-radius: 4px;
+            padding: 16px;
+            position: relative;
+            margin-top: 10px;
+        }
+        .titled-panel-header {
+            position: absolute;
+            top: -11px;
+            left: 14px;
+            background: #ffffff;
+            padding: 0 8px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+
+        /* Quick Action Buttons */
+        .quick-actions-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 5px;
+        }
+        .btn-action {
+            padding: 11px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            transition: opacity 0.15s;
+        }
+        .btn-action:hover { opacity: 0.92; }
+
+        /* Notification Monitor */
+        .notification-log-box {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            height: 150px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-top: 5px;
+            line-height: 1.6;
+        }
+        .notif-line {
+            margin-bottom: 4px;
+            color: #1e293b;
+        }
+        .notif-line.overdue {
+            color: #b91c1c;
+            font-weight: 600;
+        }
+
+        /* --- Split Panels (Forms on Left, Tables on Right) --- */
+        .split-layout {
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 15px;
+            align-items: start;
+        }
+        @media (max-width: 950px) {
+            .split-layout { grid-template-columns: 1fr; }
+        }
+
+        /* Form elements */
+        .form-row {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 12px;
+        }
+        .form-row label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 4px;
+        }
+        .form-row input[type="text"],
+        .form-row input[type="number"],
+        .form-row input[type="date"],
+        .form-row input[type="email"],
+        .form-row select {
+            padding: 7px 10px;
+            font-size: 13px;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            background: #ffffff;
+            outline: none;
+        }
+        .form-row input:focus, .form-row select:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 2px rgba(41, 128, 185, 0.15);
+        }
+        .form-checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 10px 0;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .btn-submit {
+            padding: 9px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 6px;
+        }
+
+        /* Search Filter Toolbar */
+        .toolbar-bar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .toolbar-bar input, .toolbar-bar select {
+            padding: 6px 10px;
+            font-size: 13px;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
+        .btn-toolbar {
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            background: #e2e8f0;
+            color: #1e293b;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-toolbar:hover { background: #cbd5e1; }
+
+        /* Tables matching JTable */
+        .table-container {
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            background: #ffffff;
+            overflow: auto;
+            max-height: 480px;
+        }
+        table.swing-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+        table.swing-table th {
+            background-color: #f1f5f9;
+            color: #1e293b;
+            font-weight: 700;
+            padding: 8px 12px;
+            border-bottom: 1px solid #cbd5e1;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        table.swing-table td {
+            padding: 7px 12px;
+            border-bottom: 1px solid #edf2f7;
+            color: #334155;
+        }
+        table.swing-table tr:hover {
+            background-color: #f8fafc;
+        }
+        table.swing-table tr.selected {
+            background-color: #e0f2fe !important;
+        }
+
+        /* Status badges */
+        .badge-status {
+            padding: 2px 7px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-block;
+        }
+        .badge-avail { background: #dcfce7; color: #15803d; }
+        .badge-issued { background: #fee2e2; color: #b91c1c; }
+        .badge-ref { background: #fef3c7; color: #b45309; }
+
+        /* Table Bottom Action Buttons Bar */
+        .table-bottom-bar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding-top: 10px;
+        }
+        .btn-bottom {
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Reports & Learning Console Display */
+        .console-output {
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 16px;
+            min-height: 380px;
+            max-height: 550px;
+            overflow: auto;
+            white-space: pre-wrap;
+            line-height: 1.5;
+            color: #1e293b;
+        }
+
+        /* Modal Dialog (JOptionPane-style) */
+        .modal-mask {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-box {
+            background: #ffffff;
+            border-radius: 6px;
+            width: 480px;
+            max-width: 95%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            overflow: hidden;
+            animation: modalPop 0.15s ease-out;
+        }
+        @keyframes modalPop {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .modal-header {
+            background: var(--header-bg);
+            color: #ffffff;
+            padding: 12px 18px;
+            font-size: 15px;
+            font-weight: 700;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .modal-footer {
+            padding: 12px 18px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            background: #1e293b;
+            color: #ffffff;
+            padding: 12px 18px;
+            border-radius: 5px;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: toastSlide 0.2s ease-out;
+        }
+        .toast.success { border-left: 4px solid var(--green); }
+        .toast.error { border-left: 4px solid var(--red); }
+        @keyframes toastSlide {
+            from { transform: translateX(50px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header identical to LibraryMainFrame -->
+    <header class="app-header">
+        <div class="header-title-container">
+            <h1>Library Management System</h1>
+            <p>Course: 24CS202 Object Oriented Programming Through Java | Java 23 Edition</p>
+        </div>
+        <div class="policy-badge" id="headerPolicyBadge">
+            <b>Policy:</b> 14 Days Loan | ₹5.00/Day Fine
+        </div>
+    </header>
+
+    <!-- Tabbed Pane Navigation -->
+    <nav class="tabs-header">
+        <button class="tab-button active" onclick="switchTab('dashboard')">  Dashboard  </button>
+        <button class="tab-button" onclick="switchTab('books')">  Book Management  </button>
+        <button class="tab-button" onclick="switchTab('students')">  Student Management  </button>
+        <button class="tab-button" onclick="switchTab('loans')">  Issue & Return  </button>
+        <button class="tab-button" onclick="switchTab('reports')">  Reports & Analytics  </button>
+        <button class="tab-button" onclick="switchTab('learning')">  Java Concepts (24CS202)  </button>
+    </nav>
+
+    <!-- TAB 1: DASHBOARD -->
+    <main id="tab-dashboard" class="tab-content active">
+        <!-- 6 Metric Cards -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-strip" style="background-color: #3498db;"></div>
+                <div class="metric-body">
+                    <div class="metric-title">Total Books Cataloged</div>
+                    <div class="metric-value" style="color: #3498db;" id="statTotalBooks">0</div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-strip" style="background-color: #2ecc71;"></div>
+                <div class="metric-body">
+                    <div class="metric-title">Registered Students</div>
+                    <div class="metric-value" style="color: #2ecc71;" id="statTotalStudents">0</div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-strip" style="background-color: #1abc9c;"></div>
+                <div class="metric-body">
+                    <div class="metric-title">Available for Loan</div>
+                    <div class="metric-value" style="color: #1abc9c;" id="statAvailableBooks">0</div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-strip" style="background-color: #f39c12;"></div>
+                <div class="metric-body">
+                    <div class="metric-title">Currently Issued</div>
+                    <div class="metric-value" style="color: #f39c12;" id="statIssuedBooks">0</div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-strip" style="background-color: #e74c3c;"></div>
+                <div class="metric-body">
+                    <div class="metric-title">Overdue Loans</div>
+                    <div class="metric-value" style="color: #e74c3c;" id="statOverdueLoans">0</div>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-strip" style="background-color: #9b59b6;"></div>
+                <div class="metric-body">
+                    <div class="metric-title">Total Outstanding Fines</div>
+                    <div class="metric-value" style="color: #9b59b6;" id="statOutstandingFines">₹0.00</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions & Notification Split Grid -->
+        <div class="dashboard-bottom-grid">
+            <div class="titled-panel">
+                <div class="titled-panel-header">Quick Library Operations</div>
+                <div class="quick-actions-container">
+                    <button class="btn-action" style="background-color: #2980b9;" onclick="switchTab('books')">+ Add New Book</button>
+                    <button class="btn-action" style="background-color: #27ae60;" onclick="switchTab('students')">+ Register New Student</button>
+                    <button class="btn-action" style="background-color: #d35400;" onclick="switchTab('loans')">-> Issue Book to Student</button>
+                    <button class="btn-action" style="background-color: #8e44ad;" onclick="switchTab('loans')"><- Return Borrowed Book</button>
+                </div>
+            </div>
+
+            <div class="titled-panel">
+                <div class="titled-panel-header">Background Notification Monitor</div>
+                <div class="notification-log-box" id="notifLogBox">
+                    <div class="notif-line">Connecting to Background Notification Worker...</div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+                    <button class="btn-toolbar" onclick="clearNotifications()">Clear Log</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- TAB 2: BOOK MANAGEMENT -->
+    <main id="tab-books" class="tab-content">
+        <div class="split-layout">
+            <!-- Left: Add Book Form -->
+            <div class="titled-panel">
+                <div class="titled-panel-header">Add New Book Record</div>
+                <form id="formAddBook" onsubmit="submitAddBook(event)">
+                    <div class="form-row">
+                        <label>Book ID:</label>
+                        <input type="text" id="addBookId" required placeholder="e.g. B-108">
+                    </div>
+                    <div class="form-row">
+                        <label>Title:</label>
+                        <input type="text" id="addBookTitle" required placeholder="Book Title">
+                    </div>
+                    <div class="form-row">
+                        <label>Author:</label>
+                        <input type="text" id="addBookAuthor" required placeholder="Author Name">
+                    </div>
+                    <div class="form-row">
+                        <label>Category:</label>
+                        <select id="addBookCategory">
+                            <option value="Computer Science">Computer Science</option>
+                            <option value="Information Technology">Information Technology</option>
+                            <option value="Electronics">Electronics</option>
+                            <option value="Mathematics">Mathematics</option>
+                            <option value="Physics">Physics</option>
+                            <option value="Literature">Literature</option>
+                            <option value="General" selected>General</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>Publication Year:</label>
+                        <input type="number" id="addBookYear" value="2024" required>
+                    </div>
+                    <div class="form-checkbox-row">
+                        <input type="checkbox" id="addBookIsRef" onchange="toggleRefSection(this.checked)">
+                        <label for="addBookIsRef">Non-Circulating Reference Book</label>
+                    </div>
+                    <div class="form-row" id="rowRefSection" style="display: none;">
+                        <label>Reference Section:</label>
+                        <input type="text" id="addBookRefSection" value="Section R1">
+                    </div>
+                    <button type="submit" class="btn-submit" style="background-color: #2980b9;">Save Book to Catalog</button>
+                </form>
+            </div>
+
+            <!-- Right: Search Bar & Table -->
+            <div>
+                <div class="toolbar-bar">
+                    <label style="font-size: 13px; font-weight: 600;">Search:</label>
+                    <input type="text" id="searchBookQuery" placeholder="Keyword..." style="width: 150px;">
+                    <label style="font-size: 13px; font-weight: 600;">Category:</label>
+                    <select id="searchBookCategory">
+                        <option value="All">All</option>
+                        <option value="Computer Science">Computer Science</option>
+                        <option value="Information Technology">Information Technology</option>
+                        <option value="Electronics">Electronics</option>
+                        <option value="Mathematics">Mathematics</option>
+                        <option value="Physics">Physics</option>
+                        <option value="Literature">Literature</option>
+                        <option value="General">General</option>
+                    </select>
+                    <button class="btn-toolbar" onclick="renderBooksTable()">Filter / Search</button>
+                    <button class="btn-toolbar" onclick="resetBookSearch()">Reset</button>
+                </div>
+
+                <div class="table-container">
+                    <table class="swing-table" id="booksTable">
+                        <thead>
+                            <tr>
+                                <th>Book ID</th>
+                                <th>Title</th>
+                                <th>Author</th>
+                                <th>Category</th>
+                                <th>Year</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="booksTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="table-bottom-bar">
+                    <button class="btn-bottom" style="background-color: #d35400;" onclick="promptEditSelectedBook()">Edit Selected Book</button>
+                    <button class="btn-bottom" style="background-color: #c0392b;" onclick="promptDeleteSelectedBook()">Delete Selected Book</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- TAB 3: STUDENT MANAGEMENT -->
+    <main id="tab-students" class="tab-content">
+        <div class="split-layout">
+            <!-- Left: Register Student Form -->
+            <div class="titled-panel">
+                <div class="titled-panel-header">Register New Student</div>
+                <form id="formAddStudent" onsubmit="submitAddStudent(event)">
+                    <div class="form-row">
+                        <label>Student ID:</label>
+                        <input type="text" id="addStuId" required placeholder="e.g. 24CS005">
+                    </div>
+                    <div class="form-row">
+                        <label>Full Name:</label>
+                        <input type="text" id="addStuName" required placeholder="Student Name">
+                    </div>
+                    <div class="form-row">
+                        <label>Department:</label>
+                        <select id="addStuDept">
+                            <option value="CSE" selected>CSE</option>
+                            <option value="ECE">ECE</option>
+                            <option value="IT">IT</option>
+                            <option value="EEE">EEE</option>
+                            <option value="MECH">MECH</option>
+                            <option value="CIVIL">CIVIL</option>
+                            <option value="AIDS">AIDS</option>
+                            <option value="CSBS">CSBS</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>Email:</label>
+                        <input type="email" id="addStuEmail" required placeholder="name@college.edu">
+                    </div>
+                    <div class="form-row">
+                        <label>Contact No:</label>
+                        <input type="text" id="addStuPhone" required placeholder="9876543210">
+                    </div>
+                    <button type="submit" class="btn-submit" style="background-color: #27ae60;">Register Student</button>
+                </form>
+            </div>
+
+            <!-- Right: Search Bar & Students Table -->
+            <div>
+                <div class="toolbar-bar">
+                    <label style="font-size: 13px; font-weight: 600;">Search ID / Name:</label>
+                    <input type="text" id="searchStudentQuery" placeholder="Query..." style="width: 170px;">
+                    <button class="btn-toolbar" onclick="renderStudentsTable()">Search Student</button>
+                    <button class="btn-toolbar" onclick="resetStudentSearch()">Reset</button>
+                    <button class="btn-toolbar" style="background:#e0f2fe; color:#0369a1; border-color:#bae6fd;" onclick="promptViewBorrowHistory()">View Borrow History</button>
+                </div>
+
+                <div class="table-container">
+                    <table class="swing-table" id="studentsTable">
+                        <thead>
+                            <tr>
+                                <th>Student ID</th>
+                                <th>Full Name</th>
+                                <th>Department</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                            </tr>
+                        </thead>
+                        <tbody id="studentsTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="table-bottom-bar">
+                    <button class="btn-bottom" style="background-color: #d35400;" onclick="promptEditSelectedStudent()">Edit Selected Student</button>
+                    <button class="btn-bottom" style="background-color: #c0392b;" onclick="promptDeleteSelectedStudent()">Delete Selected Student</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- TAB 4: ISSUE & RETURN DESK -->
+    <main id="tab-loans" class="tab-content">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <!-- Issue Box -->
+            <div class="titled-panel">
+                <div class="titled-panel-header">Issue Book to Student</div>
+                <form id="formIssueBook" onsubmit="submitIssueBook(event)">
+                    <div class="form-row">
+                        <label>Select Student:</label>
+                        <select id="issueSelectStudent" required></select>
+                    </div>
+                    <div class="form-row">
+                        <label>Select Available Book:</label>
+                        <select id="issueSelectBook" required></select>
+                    </div>
+                    <div style="color: #2980b9; font-size: 12px; margin-bottom: 12px; font-weight: 600;">
+                        Loan Period: 14 Days (Due in 2 weeks)
+                    </div>
+                    <button type="submit" class="btn-submit" style="background-color: #d35400;">Issue Book</button>
+                </form>
+            </div>
+
+            <!-- Return Box -->
+            <div class="titled-panel">
+                <div class="titled-panel-header">Return Issued Book</div>
+                <form id="formReturnBook" onsubmit="submitReturnBook(event)">
+                    <div class="form-row">
+                        <label>Select Issued Book:</label>
+                        <select id="returnSelectBook" required></select>
+                    </div>
+                    <div style="color: #8e44ad; font-size: 12px; margin-bottom: 12px; font-weight: 600;">
+                        Overdue Fine Rate: ₹5.00 per day
+                    </div>
+                    <button type="submit" class="btn-submit" style="background-color: #8e44ad;">Process Book Return</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Active Loans Table -->
+        <div class="titled-panel">
+            <div class="titled-panel-header">Currently Active Loans</div>
+            <div class="table-container" style="max-height: 350px;">
+                <table class="swing-table" id="loansTable">
+                    <thead>
+                        <tr>
+                            <th>Loan ID</th>
+                            <th>Student ID</th>
+                            <th>Book ID</th>
+                            <th>Issue Date</th>
+                            <th>Due Date</th>
+                            <th>Days Overdue</th>
+                            <th>Current Fine</th>
+                        </tr>
+                    </thead>
+                    <tbody id="loansTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- TAB 5: REPORTS & ANALYTICS -->
+    <main id="tab-reports" class="tab-content">
+        <div class="toolbar-bar" style="margin-bottom: 12px;">
+            <button class="btn-action" style="background: #2980b9;" onclick="runReport('audit')">Generate Comprehensive Audit</button>
+            <button class="btn-action" style="background: #27ae60;" onclick="runReport('category')">Category Breakdown</button>
+            <button class="btn-action" style="background: #d35400;" onclick="runReport('benchmark')">Run Parallel Stream Benchmark (Unit V)</button>
+            <button class="btn-action" style="background: #7f8c8d;" onclick="runReport('backup')">Create Raw Byte Stream Backup (Unit III)</button>
+        </div>
+        <div class="console-output" id="reportConsoleOutput">Click any report button above to generate statistics.</div>
+    </main>
+
+    <!-- TAB 6: JAVA CONCEPTS LEARNING SECTION -->
+    <main id="tab-learning" class="tab-content">
+        <div class="toolbar-bar" style="margin-bottom: 12px;">
+            <button class="btn-toolbar" onclick="runSyllabus('1')">Run Unit 1 Demo</button>
+            <button class="btn-toolbar" onclick="runSyllabus('2')">Run Unit 2 Demo</button>
+            <button class="btn-toolbar" onclick="runSyllabus('3')">Run Unit 3 Demo</button>
+            <button class="btn-toolbar" onclick="runSyllabus('4')">Run Unit 4 Demo</button>
+            <button class="btn-toolbar" onclick="runSyllabus('5')">Run Unit 5 Demo</button>
+            <button class="btn-toolbar" style="background:#2980b9; color:white;" onclick="runSyllabus('all')">Execute All Syllabus Demos</button>
+        </div>
+        <div class="console-output" id="syllabusConsoleOutput">
+========================================================================================
+       24CS202 OBJECT ORIENTED PROGRAMMING THROUGH JAVA - SYLLABUS MAPPING & CODE EXPLORER
+========================================================================================
+
+Welcome to the 24CS202 Educational Demonstration Panel.
+This project is engineered to embody every unit of the curriculum:
+
+  * UNIT I:   Fundamental Constructs (Primitives, Promotion, Casting, Arrays, Loops)
+  * UNIT II:  Classes, Encapsulation, Multilevel Inheritance, Dynamic Dispatch, Strings
+  * UNIT III: Packages, Interfaces, Custom Checked Exceptions, Character & Byte Streams
+  * UNIT IV:  Multithreading Lifecycle, Synchronization, EDT Rules, Generic Lambdas
+  * UNIT V:   Collections (Map, Set, List, Tree), Stream API (Filter, Map, Reduce, Parallel)
+
+Click any button above to execute live interactive demonstrations and view the outputs.
+        </div>
+    </main>
+
+    <!-- MODAL: EDIT BOOK -->
+    <div id="modalEditBook" class="modal-mask">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="modalEditBookTitleHeader">Edit Book</span>
+                <span style="cursor:pointer;" onclick="closeModal('modalEditBook')">&times;</span>
+            </div>
+            <form onsubmit="submitEditBook(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="editBookId">
+                    <div class="form-row">
+                        <label>Title:</label>
+                        <input type="text" id="editBookTitle" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Author:</label>
+                        <input type="text" id="editBookAuthor" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Category:</label>
+                        <input type="text" id="editBookCategory" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Publication Year:</label>
+                        <input type="number" id="editBookYear" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-toolbar" onclick="closeModal('modalEditBook')">Cancel</button>
+                    <button type="submit" class="btn-bottom" style="background: #d35400;">Update Book</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: EDIT STUDENT -->
+    <div id="modalEditStudent" class="modal-mask">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="modalEditStuTitleHeader">Edit Student</span>
+                <span style="cursor:pointer;" onclick="closeModal('modalEditStudent')">&times;</span>
+            </div>
+            <form onsubmit="submitEditStudent(event)">
+                <div class="modal-body">
+                    <input type="hidden" id="editStuId">
+                    <div class="form-row">
+                        <label>Full Name:</label>
+                        <input type="text" id="editStuName" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Department:</label>
+                        <input type="text" id="editStuDept" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Email Address:</label>
+                        <input type="email" id="editStuEmail" required>
+                    </div>
+                    <div class="form-row">
+                        <label>Contact Phone:</label>
+                        <input type="text" id="editStuPhone" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-toolbar" onclick="closeModal('modalEditStudent')">Cancel</button>
+                    <button type="submit" class="btn-bottom" style="background: #d35400;">Update Student</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: STUDENT BORROW HISTORY -->
+    <div id="modalHistory" class="modal-mask">
+        <div class="modal-box" style="width: 650px;">
+            <div class="modal-header">
+                <span id="modalHistoryTitle">Student Borrowing History</span>
+                <span style="cursor:pointer;" onclick="closeModal('modalHistory')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="console-output" id="modalHistoryContent" style="min-height: 200px; max-height: 350px;">Loading...</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-toolbar" onclick="closeModal('modalHistory')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- JAVASCRIPT APPLICATION LOGIC -->
+    <script>
+        // Global State Cache
+        let appState = {
+            stats: {},
+            policy: { defaultBorrowDays: 14, fineRatePerDay: 5.0 },
+            books: [],
+            students: [],
+            loans: [],
+            activeLoans: [],
+            notifications: []
+        };
+        let selectedBookId = null;
+        let selectedStudentId = null;
+
+        // Tab Switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('onclick').includes(tabName));
+            });
+            document.querySelectorAll('.tab-content').forEach(c => {
+                c.classList.toggle('active', c.id === 'tab-' + tabName);
+            });
+        }
+
+        // Fetch Complete State from Java Backend
+        async function loadAppData() {
+            try {
+                const res = await fetch('/api/data');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                appState = await res.json();
+                renderAll();
+            } catch (err) {
+                console.error('Data sync error:', err);
             }
+        }
 
-            // Tab Navigation Bar
-            h.append("<div class='tabs-bar'>");
-            h.append(String.format("<a href='/?tab=dashboard' class='tab-btn %s'>Dashboard & Stats</a>", activeTab.equals("dashboard") ? "active" : ""));
-            h.append(String.format("<a href='/?tab=books' class='tab-btn %s'>Book Management (%d)</a>", activeTab.equals("books") ? "active" : "", allBooks.size()));
-            h.append(String.format("<a href='/?tab=students' class='tab-btn %s'>Student Management (%d)</a>", activeTab.equals("students") ? "active" : "", allStudents.size()));
-            h.append(String.format("<a href='/?tab=loans' class='tab-btn %s'>Issue & Return Desk (%d Active)</a>", activeTab.equals("loans") ? "active" : "", activeLoans.size()));
-            h.append(String.format("<a href='/?tab=reports' class='tab-btn %s'>Reports & Analytics</a>", activeTab.equals("reports") ? "active" : ""));
-            h.append("<a href='/syllabus' class='tab-btn' style='background:#7c3aed; color:white; border-color:#7c3aed;'>24CS202 Syllabus Demos</a>");
-            h.append("</div>");
+        function renderAll() {
+            renderDashboard();
+            renderBooksTable();
+            renderStudentsTable();
+            renderLoansView();
+            renderNotifications();
+        }
 
-            // =================================================================
-            // TAB 1: DASHBOARD
-            // =================================================================
-            if ("dashboard".equals(activeTab)) {
-                h.append("<div class='cards'>");
-                h.append(String.format("<div class='card'><h3>Total Books</h3><div class='num'>%d</div></div>", stats.totalBooks));
-                h.append(String.format("<div class='card green'><h3>Registered Students</h3><div class='num'>%d</div></div>", stats.totalStudents));
-                h.append(String.format("<div class='card green'><h3>Available Books</h3><div class='num'>%d</div></div>", stats.availableBooks));
-                h.append(String.format("<div class='card orange'><h3>Currently Issued</h3><div class='num'>%d</div></div>", stats.issuedBooks));
-                h.append(String.format("<div class='card red'><h3>Overdue Loans</h3><div class='num'>%d</div></div>", stats.overdueLoans));
-                h.append(String.format("<div class='card purple'><h3>Outstanding Fines</h3><div class='num'>₹%.2f</div></div>", stats.totalOutstandingFines));
-                h.append("</div>");
-
-                h.append("<div class='grid-2'>");
-                // Quick actions
-                h.append("<div class='section'>");
-                h.append("<h2>Quick Actions</h2>");
-                h.append("<p style='font-size:13px; color:#64748b; margin-top:0;'>Instant shortcuts to common library desk workflows:</p>");
-                h.append("<div style='display:flex; flex-direction:column; gap:10px;'>");
-                h.append("<button onclick=\"openModal('addBookModal')\" class='btn btn-green'>+ Add New Book</button>");
-                h.append("<button onclick=\"openModal('addStudentModal')\" class='btn'>+ Register New Student</button>");
-                h.append("<a href='/?tab=loans' class='btn btn-orange'>&rarr; Issue Book to Student</a>");
-                h.append("<a href='/?tab=loans' class='btn btn-purple'>&larr; Process Book Return</a>");
-                h.append("</div></div>");
-
-                // Active loans overview
-                h.append("<div class='section'>");
-                h.append("<h2>Current Lending Snapshot</h2>");
-                h.append(String.format("<p><b>Circulation Policy:</b> %d Days loan period | Overdue fine: ₹%.2f per day</p>",
-                        manager.getDefaultBorrowDays(), manager.getFineRatePerDay()));
-                if (activeLoans.isEmpty()) {
-                    h.append("<p style='color:#64748b;'>No books currently checked out.</p>");
-                } else {
-                    h.append("<ul style='font-size:13px; padding-left:20px; line-height:1.8;'>");
-                    for (LoanRecord l : activeLoans) {
-                        boolean overdue = l.isOverdue(LocalDate.now());
-                        double fine = l.calculateFine(LocalDate.now(), manager.getFineRatePerDay());
-                        h.append(String.format("<li><b>%s</b> &rarr; Student <b>%s</b> (Book: %s) Due: %s %s</li>",
-                                l.getId(), l.getStudentId(), l.getBookId(), l.getDueDate(),
-                                overdue ? "<span class='tag-issued'>OVERDUE ₹" + String.format("%.2f", fine) + "</span>" : "<span class='tag-avail'>ON TIME</span>"));
-                    }
-                    h.append("</ul>");
-                }
-                h.append("</div></div>");
-            }
-
-            // =================================================================
-            // TAB 2: BOOK MANAGEMENT (Add, Edit, Delete, Search)
-            // =================================================================
-            if ("books".equals(activeTab)) {
-                h.append("<div class='section'>");
-                h.append("<div class='section-header'>");
-                h.append("<h2>Book Catalog Management</h2>");
-                h.append("<button onclick=\"openModal('addBookModal')\" class='btn btn-green'>+ Add New Book</button>");
-                h.append("</div>");
-
-                // Filter & Search bar
-                h.append("<form method='GET' action='/' class='filter-bar'>");
-                h.append("<input type='hidden' name='tab' value='books'>");
-                h.append(String.format("<input type='text' name='bsearch' placeholder='Search ID, title, author...' value='%s'>", escapeHtml(bookSearch)));
-                h.append("<select name='bcat'>");
-                String[] cats = { "All", "Computer Science", "Information Technology", "Electronics", "Mathematics", "Physics", "Literature", "General", "Science" };
-                for (String c : cats) {
-                    h.append(String.format("<option value='%s' %s>%s</option>", c, c.equalsIgnoreCase(catFilter) ? "selected" : "", c));
-                }
-                h.append("</select>");
-                h.append("<button type='submit' class='btn'>Filter</button>");
-                h.append("<a href='/?tab=books' class='btn btn-gray'>Reset</a>");
-                h.append("</form>");
-
-                // Books Table
-                h.append("<table><thead><tr><th>ID</th><th>Title</th><th>Author</th><th>Category</th><th>Year</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead><tbody>");
-                if (books.isEmpty()) {
-                    h.append("<tr><td colspan='8' style='text-align:center; color:#64748b;'>No books matching search criteria.</td></tr>");
-                } else {
-                    for (Book b : books) {
-                        String statusTag = b.isAvailable() 
-                                ? "<span class='tag-avail'>AVAILABLE</span>" 
-                                : "<span class='tag-issued'>ISSUED</span>";
-                        String typeTag = b.getItemType().contains("Reference") 
-                                ? "<span class='tag-ref'>REFERENCE</span>" 
-                                : "STANDARD";
-                        
-                        String editArgs = String.format("'%s', '%s', '%s', '%s', %d",
-                                escapeJs(b.getId()), escapeJs(b.getTitle()), escapeJs(b.getAuthor()),
-                                escapeJs(b.getCategory()), b.getPublicationYear());
-
-                        h.append("<tr>");
-                        h.append(String.format("<td><b>%s</b></td>", b.getId()));
-                        h.append(String.format("<td>%s</td>", escapeHtml(b.getTitle())));
-                        h.append(String.format("<td>%s</td>", escapeHtml(b.getAuthor())));
-                        h.append(String.format("<td>%s</td>", escapeHtml(b.getCategory())));
-                        h.append(String.format("<td>%d</td>", b.getPublicationYear()));
-                        h.append(String.format("<td>%s</td>", typeTag));
-                        h.append(String.format("<td>%s</td>", statusTag));
-                        h.append("<td>");
-                        h.append(String.format("<button onclick=\"openEditBook(%s)\" class='btn btn-sm btn-orange' style='margin-right:5px;'>Edit</button>", editArgs));
-                        h.append(String.format("<form method='POST' action='/books/delete' style='display:inline;' onsubmit=\"return confirm('Delete book %s?');\">", b.getId()));
-                        h.append(String.format("<input type='hidden' name='id' value='%s'>", b.getId()));
-                        h.append("<button type='submit' class='btn btn-sm btn-red'>Delete</button></form>");
-                        h.append("</td>");
-                        h.append("</tr>");
-                    }
-                }
-                h.append("</tbody></table></div>");
-            }
-
-            // =================================================================
-            // TAB 3: STUDENT MANAGEMENT (Register, Edit, Delete, Search)
-            // =================================================================
-            if ("students".equals(activeTab)) {
-                h.append("<div class='section'>");
-                h.append("<div class='section-header'>");
-                h.append("<h2>Student Registration Management</h2>");
-                h.append("<button onclick=\"openModal('addStudentModal')\" class='btn btn-green'>+ Register New Student</button>");
-                h.append("</div>");
-
-                // Student search filter
-                h.append("<form method='GET' action='/' class='filter-bar'>");
-                h.append("<input type='hidden' name='tab' value='students'>");
-                h.append(String.format("<input type='text' name='ssearch' placeholder='Search Student ID, Name, Dept...' value='%s'>", escapeHtml(stuSearch)));
-                h.append("<button type='submit' class='btn'>Search</button>");
-                h.append("<a href='/?tab=students' class='btn btn-gray'>Reset</a>");
-                h.append("</form>");
-
-                // Students Table
-                h.append("<table><thead><tr><th>Student ID</th><th>Name</th><th>Department</th><th>Email</th><th>Contact</th><th>Actions</th></tr></thead><tbody>");
-                if (students.isEmpty()) {
-                    h.append("<tr><td colspan='6' style='text-align:center; color:#64748b;'>No students found matching query.</td></tr>");
-                } else {
-                    for (Student s : students) {
-                        String editArgs = String.format("'%s', '%s', '%s', '%s', '%s'",
-                                escapeJs(s.getId()), escapeJs(s.getName()), escapeJs(s.getDepartment()),
-                                escapeJs(s.getEmail()), escapeJs(s.getContactNumber()));
-
-                        h.append("<tr>");
-                        h.append(String.format("<td><b>%s</b></td>", s.getId()));
-                        h.append(String.format("<td>%s</td>", escapeHtml(s.getName())));
-                        h.append(String.format("<td>%s</td>", escapeHtml(s.getDepartment())));
-                        h.append(String.format("<td>%s</td>", escapeHtml(s.getEmail())));
-                        h.append(String.format("<td>%s</td>", escapeHtml(s.getContactNumber())));
-                        h.append("<td>");
-                        h.append(String.format("<button onclick=\"openEditStudent(%s)\" class='btn btn-sm btn-orange' style='margin-right:5px;'>Edit</button>", editArgs));
-                        h.append(String.format("<form method='POST' action='/students/delete' style='display:inline;' onsubmit=\"return confirm('Delete student %s?');\">", s.getId()));
-                        h.append(String.format("<input type='hidden' name='id' value='%s'>", s.getId()));
-                        h.append("<button type='submit' class='btn btn-sm btn-red'>Delete</button></form>");
-                        h.append("</td>");
-                        h.append("</tr>");
-                    }
-                }
-                h.append("</tbody></table></div>");
-            }
-
-            // =================================================================
-            // TAB 4: ISSUE & RETURN DESK
-            // =================================================================
-            if ("loans".equals(activeTab)) {
-                h.append("<div class='grid-2'>");
-                
-                // Issue Book Form
-                h.append("<div class='section'>");
-                h.append("<h2>Issue Book to Student</h2>");
-                h.append("<form method='POST' action='/loans/issue'>");
-                
-                h.append("<div class='form-group'><label>Select Registered Student:</label>");
-                h.append("<select name='studentId' required>");
-                h.append("<option value=''>-- Select Student --</option>");
-                for (Student s : allStudents) {
-                    h.append(String.format("<option value='%s'>%s - %s (%s)</option>", s.getId(), s.getId(), escapeHtml(s.getName()), s.getDepartment()));
-                }
-                h.append("</select></div>");
-
-                h.append("<div class='form-group'><label>Select Available Book:</label>");
-                h.append("<select name='bookId' required>");
-                h.append("<option value=''>-- Select Book --</option>");
-                for (Book b : allBooks) {
-                    if (b.canBeBorrowed()) {
-                        h.append(String.format("<option value='%s'>%s - %s</option>", b.getId(), b.getId(), escapeHtml(b.getTitle())));
-                    }
-                }
-                h.append("</select></div>");
-
-                h.append(String.format("<div class='form-group'><label>Issue Date:</label><input type='date' name='issueDate' value='%s' required></div>", LocalDate.now()));
-                h.append(String.format("<p style='font-size:12px; color:#64748b;'>Policy: Due date will be calculated automatically (%d days loan).</p>", manager.getDefaultBorrowDays()));
-                h.append("<button type='submit' class='btn btn-orange' style='width:100%;'>Confirm & Issue Book</button>");
-                h.append("</form></div>");
-
-                // Return Book Form
-                h.append("<div class='section'>");
-                h.append("<h2>Process Book Return</h2>");
-                if (activeLoans.isEmpty()) {
-                    h.append("<p style='color:#64748b;'>No books currently on loan to return.</p>");
-                } else {
-                    h.append("<form method='POST' action='/loans/return'>");
-                    h.append("<div class='form-group'><label>Select Borrowed Book to Return:</label>");
-                    h.append("<select name='bookId' required>");
-                    h.append("<option value=''>-- Select Issued Book --</option>");
-                    for (LoanRecord l : activeLoans) {
-                        manager.getBookById(l.getBookId()).ifPresent(b -> {
-                            h.append(String.format("<option value='%s'>%s - %s (Student: %s | Due: %s)</option>",
-                                    b.getId(), b.getId(), escapeHtml(b.getTitle()), l.getStudentId(), l.getDueDate()));
-                        });
-                    }
-                    h.append("</select></div>");
-
-                    h.append(String.format("<div class='form-group'><label>Return Date:</label><input type='date' name='returnDate' value='%s' required></div>", LocalDate.now()));
-                    h.append(String.format("<p style='font-size:12px; color:#64748b;'>Overdue rate: ₹%.2f per day for returns after due date.</p>", manager.getFineRatePerDay()));
-                    h.append("<button type='submit' class='btn btn-purple' style='width:100%;'>Calculate Fines & Return Book</button>");
-                    h.append("</form>");
-                }
-                h.append("</div></div>");
-
-                // Active Loans Table
-                h.append("<div class='section'>");
-                h.append("<h2>Currently Active Loans</h2>");
-                h.append("<table><thead><tr><th>Loan ID</th><th>Student ID</th><th>Book ID</th><th>Issue Date</th><th>Due Date</th><th>Days Overdue</th><th>Current Fine</th></tr></thead><tbody>");
-                if (activeLoans.isEmpty()) {
-                    h.append("<tr><td colspan='7' style='text-align:center; color:#64748b;'>No active loans.</td></tr>");
-                } else {
-                    for (LoanRecord l : activeLoans) {
-                        long overdueDays = java.time.temporal.ChronoUnit.DAYS.between(l.getDueDate(), LocalDate.now());
-                        String overdueBadge = (overdueDays > 0)
-                                ? "<span class='tag-issued'>" + overdueDays + " days overdue</span>"
-                                : "<span class='tag-avail'>On time</span>";
-                        double fine = l.calculateFine(LocalDate.now(), manager.getFineRatePerDay());
-
-                        h.append("<tr>");
-                        h.append(String.format("<td><b>%s</b></td>", l.getId()));
-                        h.append(String.format("<td>%s</td>", l.getStudentId()));
-                        h.append(String.format("<td>%s</td>", l.getBookId()));
-                        h.append(String.format("<td>%s</td>", l.getIssueDate()));
-                        h.append(String.format("<td>%s</td>", l.getDueDate()));
-                        h.append(String.format("<td>%s</td>", overdueBadge));
-                        h.append(String.format("<td><b>₹%.2f</b></td>", fine));
-                        h.append("</tr>");
-                    }
-                }
-                h.append("</tbody></table></div>");
-            }
-
-            // =================================================================
-            // TAB 5: REPORTS & ANALYTICS
-            // =================================================================
-            if ("reports".equals(activeTab)) {
-                h.append("<div class='section'>");
-                h.append("<h2>Library Audit Report & Statistical Summary</h2>");
-                h.append("<pre>").append(escapeHtml(report.generateFullTextReport())).append("</pre>");
-                h.append("</div>");
-
-                h.append("<div class='section'>");
-                h.append("<h2>24CS202 Unit V Parallel Stream Benchmark</h2>");
-                h.append("<p style='font-size:13px; color:#64748b;'>Processes 200,000 synthetic catalog items to benchmark ForkJoinPool parallel stream acceleration:</p>");
-                h.append("<pre>").append(escapeHtml(report.benchmarkParallelVsSequentialStream())).append("</pre>");
-                h.append("</div>");
-            }
-
-            // =================================================================
-            // MODAL DIALOGS FOR ADD / EDIT OPERATIONS
-            // =================================================================
+        // Render Dashboard Stats
+        function renderDashboard() {
+            const s = appState.stats || {};
+            document.getElementById('statTotalBooks').innerText = s.totalBooks || 0;
+            document.getElementById('statTotalStudents').innerText = s.totalStudents || 0;
+            document.getElementById('statAvailableBooks').innerText = s.availableBooks || 0;
+            document.getElementById('statIssuedBooks').innerText = s.issuedBooks || 0;
+            document.getElementById('statOverdueLoans').innerText = s.overdueLoans || 0;
+            document.getElementById('statOutstandingFines').innerText = '₹' + Number(s.totalOutstandingFines || 0).toFixed(2);
             
-            // Add Book Modal
-            h.append("<div id='addBookModal' class='modal-overlay'><div class='modal'>");
-            h.append("<div class='modal-header'><h3>Add New Book to Catalog</h3><span class='close-btn' onclick=\"closeModal('addBookModal')\">&times;</span></div>");
-            h.append("<form method='POST' action='/books/add'>");
-            h.append("<div class='form-group'><label>Book ID:</label><input type='text' name='id' placeholder='e.g. B-108' required></div>");
-            h.append("<div class='form-group'><label>Title:</label><input type='text' name='title' placeholder='Book Title' required></div>");
-            h.append("<div class='form-group'><label>Author:</label><input type='text' name='author' placeholder='Author Name' required></div>");
-            h.append("<div class='form-group'><label>Category:</label><input type='text' name='category' placeholder='Computer Science / Physics...' value='General' required></div>");
-            h.append(String.format("<div class='form-group'><label>Publication Year:</label><input type='number' name='year' value='%d' required></div>", LocalDate.now().getYear()));
-            h.append("<div class='form-group'><label><input type='checkbox' name='isRef' value='true' id='chkIsRef' onchange=\"document.getElementById('refSecGroup').style.display=this.checked?'block':'none'\"> Non-Circulating Reference Book</label></div>");
-            h.append("<div class='form-group' id='refSecGroup' style='display:none;'><label>Reading Room Section:</label><input type='text' name='refSection' value='Section R1'></div>");
-            h.append("<button type='submit' class='btn btn-green' style='width:100%;'>Save Book</button>");
-            h.append("</form></div></div>");
-
-            // Edit Book Modal
-            h.append("<div id='editBookModal' class='modal-overlay'><div class='modal'>");
-            h.append("<div class='modal-header'><h3>Edit Book Details</h3><span class='close-btn' onclick=\"closeModal('editBookModal')\">&times;</span></div>");
-            h.append("<form method='POST' action='/books/edit'>");
-            h.append("<input type='hidden' name='id' id='editBookId'>");
-            h.append("<div class='form-group'><label>Book ID (Read-only):</label><input type='text' id='editBookIdDisplay' disabled></div>");
-            h.append("<div class='form-group'><label>Title:</label><input type='text' name='title' id='editBookTitle' required></div>");
-            h.append("<div class='form-group'><label>Author:</label><input type='text' name='author' id='editBookAuthor' required></div>");
-            h.append("<div class='form-group'><label>Category:</label><input type='text' name='category' id='editBookCat' required></div>");
-            h.append("<div class='form-group'><label>Publication Year:</label><input type='number' name='year' id='editBookYear' required></div>");
-            h.append("<button type='submit' class='btn btn-orange' style='width:100%;'>Update Book</button>");
-            h.append("</form></div></div>");
-
-            // Add Student Modal
-            h.append("<div id='addStudentModal' class='modal-overlay'><div class='modal'>");
-            h.append("<div class='modal-header'><h3>Register New Student</h3><span class='close-btn' onclick=\"closeModal('addStudentModal')\">&times;</span></div>");
-            h.append("<form method='POST' action='/students/add'>");
-            h.append("<div class='form-group'><label>Student ID:</label><input type='text' name='id' placeholder='e.g. 24CS005' required></div>");
-            h.append("<div class='form-group'><label>Full Name:</label><input type='text' name='name' placeholder='Student Name' required></div>");
-            h.append("<div class='form-group'><label>Department:</label><input type='text' name='department' placeholder='CSE, IT, ECE...' value='CSE' required></div>");
-            h.append("<div class='form-group'><label>Email Address:</label><input type='email' name='email' placeholder='name@college.edu' required></div>");
-            h.append("<div class='form-group'><label>Contact Phone:</label><input type='text' name='phone' placeholder='9876543210' required></div>");
-            h.append("<button type='submit' class='btn btn-green' style='width:100%;'>Register Student</button>");
-            h.append("</form></div></div>");
-
-            // Edit Student Modal
-            h.append("<div id='editStudentModal' class='modal-overlay'><div class='modal'>");
-            h.append("<div class='modal-header'><h3>Edit Student Details</h3><span class='close-btn' onclick=\"closeModal('editStudentModal')\">&times;</span></div>");
-            h.append("<form method='POST' action='/students/edit'>");
-            h.append("<input type='hidden' name='id' id='editStudentId'>");
-            h.append("<div class='form-group'><label>Student ID (Read-only):</label><input type='text' id='editStudentIdDisplay' disabled></div>");
-            h.append("<div class='form-group'><label>Full Name:</label><input type='text' name='name' id='editStudentName' required></div>");
-            h.append("<div class='form-group'><label>Department:</label><input type='text' name='department' id='editStudentDept' required></div>");
-            h.append("<div class='form-group'><label>Email Address:</label><input type='email' name='email' id='editStudentEmail' required></div>");
-            h.append("<div class='form-group'><label>Contact Phone:</label><input type='text' name='phone' id='editStudentPhone' required></div>");
-            h.append("<button type='submit' class='btn btn-orange' style='width:100%;'>Update Student</button>");
-            h.append("</form></div></div>");
-
-            // Modal Javascript functions
-            h.append("<script>");
-            h.append("function openModal(id) { document.getElementById(id).style.display = 'flex'; }");
-            h.append("function closeModal(id) { document.getElementById(id).style.display = 'none'; }");
-            h.append("function openEditBook(id, title, author, cat, year) {");
-            h.append("  document.getElementById('editBookId').value = id;");
-            h.append("  document.getElementById('editBookIdDisplay').value = id;");
-            h.append("  document.getElementById('editBookTitle').value = title;");
-            h.append("  document.getElementById('editBookAuthor').value = author;");
-            h.append("  document.getElementById('editBookCat').value = cat;");
-            h.append("  document.getElementById('editBookYear').value = year;");
-            h.append("  openModal('editBookModal');");
-            h.append("}");
-            h.append("function openEditStudent(id, name, dept, email, phone) {");
-            h.append("  document.getElementById('editStudentId').value = id;");
-            h.append("  document.getElementById('editStudentIdDisplay').value = id;");
-            h.append("  document.getElementById('editStudentName').value = name;");
-            h.append("  document.getElementById('editStudentDept').value = dept;");
-            h.append("  document.getElementById('editStudentEmail').value = email;");
-            h.append("  document.getElementById('editStudentPhone').value = phone;");
-            h.append("  openModal('editStudentModal');");
-            h.append("}");
-            h.append("window.onclick = function(e) { if(e.target.classList.contains('modal-overlay')) e.target.style.display='none'; };");
-            h.append("</script>");
-
-            h.append("</div></body></html>");
-
-            byte[] bytes = h.toString().getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
-            exchange.sendResponseHeaders(200, bytes.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(bytes);
+            if (appState.policy) {
+                document.getElementById('headerPolicyBadge').innerHTML = 
+                    `<b>Policy:</b> ${appState.policy.defaultBorrowDays} Days Loan | ₹${Number(appState.policy.fineRatePerDay).toFixed(2)}/Day Fine`;
             }
         }
+
+        // Render Background Notification Log
+        function renderNotifications() {
+            const box = document.getElementById('notifLogBox');
+            const notifs = appState.notifications || [];
+            if (notifs.length === 0) {
+                box.innerHTML = '<div class="notif-line" style="color:#64748b;">(No notifications recorded)</div>';
+                return;
+            }
+            box.innerHTML = notifs.map(n => {
+                const isOverdue = n.includes('OVERDUE');
+                return `<div class="notif-line ${isOverdue ? 'overdue' : ''}">${escapeHtml(n)}</div>`;
+            }).join('');
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function clearNotifications() {
+            await fetch('/api/notifications/clear', { method: 'POST' });
+            appState.notifications = [];
+            renderNotifications();
+            showToast('Notification log cleared.', 'success');
+        }
+
+        // Render Books Table
+        function renderBooksTable() {
+            const q = (document.getElementById('searchBookQuery').value || '').toLowerCase().trim();
+            const cat = document.getElementById('searchBookCategory').value;
+            const tbody = document.getElementById('booksTableBody');
+
+            const filtered = (appState.books || []).filter(b => {
+                const matchesQ = !q || b.id.toLowerCase().includes(q) || b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q);
+                const matchesCat = (cat === 'All') || (b.category.toLowerCase() === cat.toLowerCase());
+                return matchesQ && matchesCat;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:15px;">No books matching query.</td></tr>';
+                selectedBookId = null;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(b => {
+                const isSel = (b.id === selectedBookId);
+                const statusBadge = b.available 
+                    ? '<span class="badge-status badge-avail">AVAILABLE</span>' 
+                    : '<span class="badge-status badge-issued">ISSUED</span>';
+                const typeBadge = b.itemType.includes('Reference')
+                    ? '<span class="badge-status badge-ref">Reference</span>'
+                    : 'Standard Book';
+
+                return `<tr class="${isSel ? 'selected' : ''}" onclick="selectBookRow('${b.id}')">
+                    <td><b>${escapeHtml(b.id)}</b></td>
+                    <td>${escapeHtml(b.title)}</td>
+                    <td>${escapeHtml(b.author)}</td>
+                    <td>${escapeHtml(b.category)}</td>
+                    <td>${b.publicationYear}</td>
+                    <td>${typeBadge}</td>
+                    <td>${statusBadge}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function selectBookRow(id) {
+            selectedBookId = (selectedBookId === id) ? null : id;
+            renderBooksTable();
+        }
+
+        function resetBookSearch() {
+            document.getElementById('searchBookQuery').value = '';
+            document.getElementById('searchBookCategory').value = 'All';
+            renderBooksTable();
+        }
+
+        // Render Students Table
+        function renderStudentsTable() {
+            const q = (document.getElementById('searchStudentQuery').value || '').toLowerCase().trim();
+            const tbody = document.getElementById('studentsTableBody');
+
+            const filtered = (appState.students || []).filter(s => {
+                return !q || s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || s.department.toLowerCase().includes(q);
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:15px;">No students matching query.</td></tr>';
+                selectedStudentId = null;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(s => {
+                const isSel = (s.id === selectedStudentId);
+                return `<tr class="${isSel ? 'selected' : ''}" onclick="selectStudentRow('${s.id}')">
+                    <td><b>${escapeHtml(s.id)}</b></td>
+                    <td>${escapeHtml(s.name)}</td>
+                    <td>${escapeHtml(s.department)}</td>
+                    <td>${escapeHtml(s.email)}</td>
+                    <td>${escapeHtml(s.contactNumber)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function selectStudentRow(id) {
+            selectedStudentId = (selectedStudentId === id) ? null : id;
+            renderStudentsTable();
+        }
+
+        function resetStudentSearch() {
+            document.getElementById('searchStudentQuery').value = '';
+            renderStudentsTable();
+        }
+
+        // Render Loans View & Dropdowns
+        function renderLoansView() {
+            // Dropdowns
+            const issueStuSelect = document.getElementById('issueSelectStudent');
+            issueStuSelect.innerHTML = '<option value="">-- Select Student --</option>' +
+                (appState.students || []).map(s => `<option value="${s.id}">${s.id} - ${escapeHtml(s.name)} (${s.department})</option>`).join('');
+
+            const issueBookSelect = document.getElementById('issueSelectBook');
+            const availableBooks = (appState.books || []).filter(b => b.canBeBorrowed);
+            issueBookSelect.innerHTML = '<option value="">-- Select Available Book --</option>' +
+                availableBooks.map(b => `<option value="${b.id}">${b.id} - ${escapeHtml(b.title)}</option>`).join('');
+
+            const returnSelect = document.getElementById('returnSelectBook');
+            const activeLoans = appState.activeLoans || [];
+            returnSelect.innerHTML = '<option value="">-- Select Issued Book --</option>' +
+                activeLoans.map(l => `<option value="${l.bookId}">${l.bookId} - Loan: ${l.id} (Student: ${l.studentId})</option>`).join('');
+
+            // Loans Table
+            const tbody = document.getElementById('loansTableBody');
+            if (activeLoans.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:15px;">No active loans.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = activeLoans.map(l => {
+                const overdueStr = (l.overdueDays > 0) ? `${l.overdueDays} days` : 'On time';
+                const statusBadge = (l.overdueDays > 0) 
+                    ? `<span class="badge-status badge-issued">${overdueStr}</span>` 
+                    : `<span class="badge-status badge-avail">${overdueStr}</span>`;
+
+                return `<tr>
+                    <td><b>${escapeHtml(l.id)}</b></td>
+                    <td>${escapeHtml(l.studentId)}</td>
+                    <td>${escapeHtml(l.bookId)}</td>
+                    <td>${l.issueDate}</td>
+                    <td>${l.dueDate}</td>
+                    <td>${statusBadge}</td>
+                    <td><b>₹${Number(l.currentFine || 0).toFixed(2)}</b></td>
+                </tr>`;
+            }).join('');
+        }
+
+        // --- Form Submissions ---
+
+        function toggleRefSection(checked) {
+            document.getElementById('rowRefSection').style.display = checked ? 'flex' : 'none';
+        }
+
+        async function submitAddBook(e) {
+            e.preventDefault();
+            const body = {
+                id: document.getElementById('addBookId').value.trim(),
+                title: document.getElementById('addBookTitle').value.trim(),
+                author: document.getElementById('addBookAuthor').value.trim(),
+                category: document.getElementById('addBookCategory').value,
+                year: parseInt(document.getElementById('addBookYear').value, 10),
+                isRef: document.getElementById('addBookIsRef').checked,
+                refSection: document.getElementById('addBookRefSection').value.trim()
+            };
+
+            const res = await apiPost('/api/books/add', body);
+            if (res.success) {
+                showToast('Book successfully added to catalog!', 'success');
+                document.getElementById('formAddBook').reset();
+                toggleRefSection(false);
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        function promptEditSelectedBook() {
+            if (!selectedBookId) {
+                showToast('Please select a book from the table to edit.', 'error');
+                return;
+            }
+            const b = appState.books.find(x => x.id === selectedBookId);
+            if (!b) return;
+
+            document.getElementById('editBookId').value = b.id;
+            document.getElementById('modalEditBookTitleHeader').innerText = 'Edit Book: ' + b.id;
+            document.getElementById('editBookTitle').value = b.title;
+            document.getElementById('editBookAuthor').value = b.author;
+            document.getElementById('editBookCategory').value = b.category;
+            document.getElementById('editBookYear').value = b.publicationYear;
+            openModal('modalEditBook');
+        }
+
+        async function submitEditBook(e) {
+            e.preventDefault();
+            const body = {
+                id: document.getElementById('editBookId').value,
+                title: document.getElementById('editBookTitle').value.trim(),
+                author: document.getElementById('editBookAuthor').value.trim(),
+                category: document.getElementById('editBookCategory').value.trim(),
+                year: parseInt(document.getElementById('editBookYear').value, 10)
+            };
+            const res = await apiPost('/api/books/update', body);
+            if (res.success) {
+                showToast('Book updated successfully!', 'success');
+                closeModal('modalEditBook');
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function promptDeleteSelectedBook() {
+            if (!selectedBookId) {
+                showToast('Please select a book from the table to delete.', 'error');
+                return;
+            }
+            if (!confirm(`Are you sure you want to delete book [${selectedBookId}]?`)) return;
+
+            const res = await apiPost('/api/books/delete', { id: selectedBookId });
+            if (res.success) {
+                showToast('Book deleted successfully.', 'success');
+                selectedBookId = null;
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function submitAddStudent(e) {
+            e.preventDefault();
+            const body = {
+                id: document.getElementById('addStuId').value.trim(),
+                name: document.getElementById('addStuName').value.trim(),
+                department: document.getElementById('addStuDept').value,
+                email: document.getElementById('addStuEmail').value.trim(),
+                phone: document.getElementById('addStuPhone').value.trim()
+            };
+
+            const res = await apiPost('/api/students/add', body);
+            if (res.success) {
+                showToast('Student registered successfully!', 'success');
+                document.getElementById('formAddStudent').reset();
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        function promptEditSelectedStudent() {
+            if (!selectedStudentId) {
+                showToast('Please select a student from the table to edit.', 'error');
+                return;
+            }
+            const s = appState.students.find(x => x.id === selectedStudentId);
+            if (!s) return;
+
+            document.getElementById('editStuId').value = s.id;
+            document.getElementById('modalEditStuTitleHeader').innerText = 'Edit Student: ' + s.id;
+            document.getElementById('editStuName').value = s.name;
+            document.getElementById('editStuDept').value = s.department;
+            document.getElementById('editStuEmail').value = s.email;
+            document.getElementById('editStuPhone').value = s.contactNumber;
+            openModal('modalEditStudent');
+        }
+
+        async function submitEditStudent(e) {
+            e.preventDefault();
+            const body = {
+                id: document.getElementById('editStuId').value,
+                name: document.getElementById('editStuName').value.trim(),
+                department: document.getElementById('editStuDept').value.trim(),
+                email: document.getElementById('editStuEmail').value.trim(),
+                phone: document.getElementById('editStuPhone').value.trim()
+            };
+            const res = await apiPost('/api/students/update', body);
+            if (res.success) {
+                showToast('Student updated successfully!', 'success');
+                closeModal('modalEditStudent');
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function promptDeleteSelectedStudent() {
+            if (!selectedStudentId) {
+                showToast('Please select a student from the table to delete.', 'error');
+                return;
+            }
+            if (!confirm(`Are you sure you want to delete student [${selectedStudentId}]?`)) return;
+
+            const res = await apiPost('/api/students/delete', { id: selectedStudentId });
+            if (res.success) {
+                showToast('Student deleted successfully.', 'success');
+                selectedStudentId = null;
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function promptViewBorrowHistory() {
+            if (!selectedStudentId) {
+                showToast('Please select a student from the table first.', 'error');
+                return;
+            }
+            document.getElementById('modalHistoryTitle').innerText = 'Borrowing History: Student ' + selectedStudentId;
+            document.getElementById('modalHistoryContent').innerText = 'Loading borrowing history...';
+            openModal('modalHistory');
+
+            try {
+                const res = await fetch('/api/students/history?id=' + encodeURIComponent(selectedStudentId));
+                const data = await res.json();
+                document.getElementById('modalHistoryContent').innerText = data.text;
+            } catch (err) {
+                document.getElementById('modalHistoryContent').innerText = 'Error loading history: ' + err.message;
+            }
+        }
+
+        async function submitIssueBook(e) {
+            e.preventDefault();
+            const studentId = document.getElementById('issueSelectStudent').value;
+            const bookId = document.getElementById('issueSelectBook').value;
+            if (!studentId || !bookId) {
+                showToast('Please select both a student and an available book.', 'error');
+                return;
+            }
+
+            const res = await apiPost('/api/loans/issue', { studentId, bookId });
+            if (res.success) {
+                showToast(`Book Issued Successfully!\\nLoan ID: ${res.loanId}\\nDue Date: ${res.dueDate}`, 'success');
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        async function submitReturnBook(e) {
+            e.preventDefault();
+            const bookId = document.getElementById('returnSelectBook').value;
+            if (!bookId) {
+                showToast('Please select an issued book to return.', 'error');
+                return;
+            }
+
+            const res = await apiPost('/api/loans/return', { bookId });
+            if (res.success) {
+                const fineMsg = res.fine > 0 
+                    ? `Overdue fine assessed: ₹${Number(res.fine).toFixed(2)}` 
+                    : 'Returned on time! No overdue fine assessed.';
+                showToast(`Book Returned Successfully!\\n${fineMsg}`, 'success');
+                await loadAppData();
+            } else {
+                showToast(res.error, 'error');
+            }
+        }
+
+        // --- Reports & Syllabus Actions ---
+        async function runReport(type) {
+            const out = document.getElementById('reportConsoleOutput');
+            out.innerText = 'Generating report...';
+            try {
+                let url = '/api/reports/' + type;
+                let method = (type === 'backup') ? 'POST' : 'GET';
+                const res = await fetch(url, { method });
+                const json = await res.json();
+                out.innerText = json.output;
+            } catch (err) {
+                out.innerText = 'Report generation failed: ' + err.message;
+            }
+        }
+
+        async function runSyllabus(unit) {
+            const out = document.getElementById('syllabusConsoleOutput');
+            out.innerText = `Executing 24CS202 syllabus demonstration (Unit ${unit})...`;
+            try {
+                const res = await fetch('/api/syllabus/demo?unit=' + encodeURIComponent(unit));
+                const json = await res.json();
+                out.innerText = json.output;
+            } catch (err) {
+                out.innerText = 'Demo execution error: ' + err.message;
+            }
+        }
+
+        // --- Helper Utilities ---
+        async function apiPost(url, data) {
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                return await res.json();
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        window.onclick = function(e) { if (e.target.classList.contains('modal-mask')) e.target.style.display = 'none'; };
+
+        function showToast(msg, type = 'success') {
+            const c = document.getElementById('toastContainer');
+            const t = document.createElement('div');
+            t.className = 'toast ' + type;
+            t.innerText = msg;
+            c.appendChild(t);
+            setTimeout(() => { t.remove(); }, 4000);
+        }
+
+        function escapeHtml(s) {
+            if (!s) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Poll for updates every 3 seconds to ensure real-time consistency with background workers & Swing
+        setInterval(loadAppData, 3000);
+        // Initial load
+        window.onload = loadAppData;
+    </script>
+</body>
+</html>
+""";
     }
 
     // =========================================================================
-    // BOOK ACTION HANDLERS
+    // 2. DATA SYNCHRONIZATION API HANDLERS
     // =========================================================================
 
-    private class AddBookHandler implements HttpHandler {
+    private class ApiDataHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String id = params.get("id");
-                    String title = params.get("title");
-                    String author = params.get("author");
-                    String category = params.get("category");
-                    int year = Integer.parseInt(params.getOrDefault("year", "2024"));
-                    boolean isRef = "true".equalsIgnoreCase(params.get("isRef"));
-                    String section = params.getOrDefault("refSection", "Reference Room");
+            LibraryReport.DashboardStats stats = report.getDashboardStats();
+            List<Book> books = manager.getAllBooks();
+            List<Student> students = manager.getAllStudents();
+            List<LoanRecord> activeLoans = manager.getActiveLoans();
+            List<String> notifications = NotificationThread.getNotificationHistory();
+            LocalDate today = LocalDate.now();
 
-                    Book b = isRef ? new ReferenceBook(id, title, author, category, year, section)
-                                   : new Book(id, title, author, category, year);
-                    manager.addBook(b);
-                    sendRedirect(exchange, "/?tab=books&msg=Book+added+successfully:+[" + urlEncode(id) + "]");
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=books&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=books");
-        }
-    }
-
-    private class EditBookHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String id = params.get("id");
-                    String title = params.get("title");
-                    String author = params.get("author");
-                    String category = params.get("category");
-                    int year = Integer.parseInt(params.getOrDefault("year", "2024"));
-
-                    Optional<Book> opt = manager.getBookById(id);
-                    if (opt.isEmpty()) {
-                        throw new IllegalArgumentException("Book not found with ID: " + id);
-                    }
-                    Book current = opt.get();
-                    Book updated;
-                    if (current instanceof ReferenceBook) {
-                        updated = new ReferenceBook(id, title, author, category, year, ((ReferenceBook) current).getReadingRoomSection());
-                    } else {
-                        updated = new Book(id, title, author, category, year);
-                    }
-                    manager.updateBook(updated);
-                    sendRedirect(exchange, "/?tab=books&msg=Book+updated+successfully:+[" + urlEncode(id) + "]");
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=books&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=books");
-        }
-    }
-
-    private class DeleteBookHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String id = params.get("id");
-                    manager.deleteBook(id);
-                    sendRedirect(exchange, "/?tab=books&msg=Book+deleted+successfully:+[" + urlEncode(id) + "]");
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=books&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=books");
-        }
-    }
-
-    // =========================================================================
-    // STUDENT ACTION HANDLERS
-    // =========================================================================
-
-    private class AddStudentHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String id = params.get("id");
-                    String name = params.get("name");
-                    String dept = params.get("department");
-                    String email = params.get("email");
-                    String phone = params.get("phone");
-
-                    Student s = new Student(id, name, dept, email, phone);
-                    manager.registerStudent(s);
-                    sendRedirect(exchange, "/?tab=students&msg=Student+registered+successfully:+[" + urlEncode(id) + "]");
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=students&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=students");
-        }
-    }
-
-    private class EditStudentHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String id = params.get("id");
-                    String name = params.get("name");
-                    String dept = params.get("department");
-                    String email = params.get("email");
-                    String phone = params.get("phone");
-
-                    Student s = new Student(id, name, dept, email, phone);
-                    manager.updateStudent(s);
-                    sendRedirect(exchange, "/?tab=students&msg=Student+updated+successfully:+[" + urlEncode(id) + "]");
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=students&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=students");
-        }
-    }
-
-    private class DeleteStudentHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String id = params.get("id");
-                    manager.deleteStudent(id);
-                    sendRedirect(exchange, "/?tab=students&msg=Student+deleted+successfully:+[" + urlEncode(id) + "]");
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=students&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=students");
-        }
-    }
-
-    // =========================================================================
-    // LOAN ACTION HANDLERS (Issue & Return)
-    // =========================================================================
-
-    private class IssueBookHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String studentId = params.get("studentId");
-                    String bookId = params.get("bookId");
-                    String dateStr = params.get("issueDate");
-                    LocalDate issueDate = (dateStr != null && !dateStr.isEmpty()) ? LocalDate.parse(dateStr) : LocalDate.now();
-
-                    LoanRecord loan = manager.issueBook(studentId, bookId, issueDate);
-                    sendRedirect(exchange, "/?tab=loans&msg=Book+issued+successfully!+Loan+ID:+" + urlEncode(loan.getId()) + "+(Due:+" + loan.getDueDate() + ")");
-                    return;
-                } catch (BookUnavailableException bue) {
-                    sendRedirect(exchange, "/?tab=loans&err=" + urlEncode(bue.getMessage()));
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=loans&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=loans");
-        }
-    }
-
-    private class ReturnBookHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-                Map<String, String> params = parseFormData(exchange);
-                try {
-                    String bookId = params.get("bookId");
-                    String dateStr = params.get("returnDate");
-                    LocalDate retDate = (dateStr != null && !dateStr.isEmpty()) ? LocalDate.parse(dateStr) : LocalDate.now();
-
-                    LoanRecord loan = manager.returnBook(bookId, retDate);
-                    String fineMsg = (loan.getFineAmount() > 0)
-                            ? String.format("Overdue fine assessed: ₹%.2f", loan.getFineAmount())
-                            : "Returned on time (Fine: ₹0.00)";
-                    sendRedirect(exchange, "/?tab=loans&msg=Book+returned+successfully!+" + urlEncode(fineMsg));
-                    return;
-                } catch (Exception ex) {
-                    sendRedirect(exchange, "/?tab=loans&err=" + urlEncode(ex.getMessage()));
-                    return;
-                }
-            }
-            sendRedirect(exchange, "/?tab=loans");
-        }
-    }
-
-    // =========================================================================
-    // SYLLABUS HANDLER
-    // =========================================================================
-
-    private class SyllabusHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
             StringBuilder sb = new StringBuilder();
-            sb.append("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>24CS202 Syllabus Demos</title>");
-            sb.append("<style>body{font-family:monospace;background:#1e1e1e;color:#d4d4d4;padding:25px;line-height:1.5;}");
-            sb.append("a{color:#58a6ff;} pre{background:#252526;padding:15px;border-radius:6px;overflow-x:auto;}</style></head><body>");
-            sb.append("<p><a href='/'>&larr; Back to Dashboard</a></p>");
-            sb.append("<h1>24CS202 Object Oriented Programming Through Java - Syllabus Suite</h1>");
-            sb.append("<pre>");
-            sb.append(SyllabusDemo.demoUnit1PrimitivesAndArrays()).append("\n");
-            sb.append(SyllabusDemo.demoUnit2StringsAndInnerClasses()).append("\n");
-            sb.append(SyllabusDemo.demoUnit3ExceptionsAndByteStreams()).append("\n");
-            sb.append(SyllabusDemo.demoUnit4ThreadsAndLambdas()).append("\n");
-            sb.append(SyllabusDemo.demoUnit5CollectionsAndIterators()).append("\n");
-            sb.append("</pre></body></html>");
+            sb.append("{");
+            sb.append("\"stats\":{");
+            sb.append("\"totalBooks\":").append(stats.totalBooks).append(",");
+            sb.append("\"totalStudents\":").append(stats.totalStudents).append(",");
+            sb.append("\"availableBooks\":").append(stats.availableBooks).append(",");
+            sb.append("\"issuedBooks\":").append(stats.issuedBooks).append(",");
+            sb.append("\"overdueLoans\":").append(stats.overdueLoans).append(",");
+            sb.append("\"totalOutstandingFines\":").append(stats.totalOutstandingFines);
+            sb.append("},");
 
-            byte[] bytes = sb.toString().getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
-            exchange.sendResponseHeaders(200, bytes.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(bytes);
+            sb.append("\"policy\":{");
+            sb.append("\"defaultBorrowDays\":").append(manager.getDefaultBorrowDays()).append(",");
+            sb.append("\"fineRatePerDay\":").append(manager.getFineRatePerDay());
+            sb.append("},");
+
+            sb.append("\"books\":[");
+            for (int i = 0; i < books.size(); i++) {
+                Book b = books.get(i);
+                sb.append("{");
+                sb.append("\"id\":\"").append(escapeJson(b.getId())).append("\",");
+                sb.append("\"title\":\"").append(escapeJson(b.getTitle())).append("\",");
+                sb.append("\"author\":\"").append(escapeJson(b.getAuthor())).append("\",");
+                sb.append("\"category\":\"").append(escapeJson(b.getCategory())).append("\",");
+                sb.append("\"publicationYear\":").append(b.getPublicationYear()).append(",");
+                sb.append("\"itemType\":\"").append(escapeJson(b.getItemType())).append("\",");
+                sb.append("\"available\":").append(b.isAvailable()).append(",");
+                sb.append("\"canBeBorrowed\":").append(b.canBeBorrowed());
+                sb.append("}").append(i < books.size() - 1 ? "," : "");
+            }
+            sb.append("],");
+
+            sb.append("\"students\":[");
+            for (int i = 0; i < students.size(); i++) {
+                Student s = students.get(i);
+                sb.append("{");
+                sb.append("\"id\":\"").append(escapeJson(s.getId())).append("\",");
+                sb.append("\"name\":\"").append(escapeJson(s.getName())).append("\",");
+                sb.append("\"department\":\"").append(escapeJson(s.getDepartment())).append("\",");
+                sb.append("\"email\":\"").append(escapeJson(s.getEmail())).append("\",");
+                sb.append("\"contactNumber\":\"").append(escapeJson(s.getContactNumber())).append("\"");
+                sb.append("}").append(i < students.size() - 1 ? "," : "");
+            }
+            sb.append("],");
+
+            sb.append("\"activeLoans\":[");
+            for (int i = 0; i < activeLoans.size(); i++) {
+                LoanRecord l = activeLoans.get(i);
+                long overdueDays = java.time.temporal.ChronoUnit.DAYS.between(l.getDueDate(), today);
+                double fine = l.calculateFine(today, manager.getFineRatePerDay());
+                sb.append("{");
+                sb.append("\"id\":\"").append(escapeJson(l.getId())).append("\",");
+                sb.append("\"studentId\":\"").append(escapeJson(l.getStudentId())).append("\",");
+                sb.append("\"bookId\":\"").append(escapeJson(l.getBookId())).append("\",");
+                sb.append("\"issueDate\":\"").append(l.getIssueDate()).append("\",");
+                sb.append("\"dueDate\":\"").append(l.getDueDate()).append("\",");
+                sb.append("\"overdueDays\":").append(Math.max(0, overdueDays)).append(",");
+                sb.append("\"currentFine\":").append(fine);
+                sb.append("}").append(i < activeLoans.size() - 1 ? "," : "");
+            }
+            sb.append("],");
+
+            sb.append("\"notifications\":[");
+            for (int i = 0; i < notifications.size(); i++) {
+                sb.append("\"").append(escapeJson(notifications.get(i))).append("\"")
+                  .append(i < notifications.size() - 1 ? "," : "");
+            }
+            sb.append("]");
+            sb.append("}");
+
+            sendResponse(exchange, 200, sb.toString(), "application/json");
+        }
+    }
+
+    private class ApiAddBookHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String id = (String) body.get("id");
+                String title = (String) body.get("title");
+                String author = (String) body.get("author");
+                String category = (String) body.get("category");
+                int year = ((Number) body.get("year")).intValue();
+                boolean isRef = Boolean.TRUE.equals(body.get("isRef"));
+                String refSection = (String) body.get("refSection");
+
+                Book book = isRef ? new ReferenceBook(id, title, author, category, year, refSection)
+                                  : new Book(id, title, author, category, year);
+                manager.addBook(book);
+                NotificationThread.logMessage("[Catalog Update] New Book added: [" + id + "] " + title);
+                sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
             }
         }
     }
 
-    // =========================================================================
-    // HTTP UTILITY METHODS
-    // =========================================================================
+    private class ApiUpdateBookHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String id = (String) body.get("id");
+                String title = (String) body.get("title");
+                String author = (String) body.get("author");
+                String category = (String) body.get("category");
+                int year = ((Number) body.get("year")).intValue();
 
-    private void sendRedirect(HttpExchange exchange, String location) throws IOException {
-        exchange.getResponseHeaders().set("Location", location);
-        exchange.sendResponseHeaders(303, -1);
-        exchange.close();
-    }
-
-    private Map<String, String> parseQueryParams(URI uri) {
-        Map<String, String> map = new HashMap<>();
-        String rawQuery = uri.getRawQuery();
-        if (rawQuery == null || rawQuery.isEmpty()) return map;
-
-        String[] pairs = rawQuery.split("&");
-        for (String pair : pairs) {
-            String[] kv = pair.split("=", 2);
-            String k = URLDecoder.decode(kv[0], StandardCharsets.UTF_8);
-            String v = kv.length > 1 ? URLDecoder.decode(kv[1], StandardCharsets.UTF_8) : "";
-            map.put(k, v);
+                Optional<Book> opt = manager.getBookById(id);
+                if (opt.isEmpty()) throw new IllegalArgumentException("Book not found: " + id);
+                Book existing = opt.get();
+                Book updated;
+                if (existing instanceof ReferenceBook) {
+                    updated = new ReferenceBook(id, title, author, category, year, ((ReferenceBook) existing).getReadingRoomSection());
+                } else {
+                    updated = new Book(id, title, author, category, year);
+                }
+                manager.updateBook(updated);
+                NotificationThread.logMessage("[Catalog Update] Book details updated: [" + id + "]");
+                sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
         }
-        return map;
     }
 
-    private Map<String, String> parseFormData(HttpExchange exchange) throws IOException {
-        Map<String, String> map = new HashMap<>();
+    private class ApiDeleteBookHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String id = (String) body.get("id");
+                manager.deleteBook(id);
+                NotificationThread.logMessage("[Catalog Update] Book deleted from catalog: [" + id + "]");
+                sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiAddStudentHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String id = (String) body.get("id");
+                String name = (String) body.get("name");
+                String dept = (String) body.get("department");
+                String email = (String) body.get("email");
+                String phone = (String) body.get("phone");
+
+                Student s = new Student(id, name, dept, email, phone);
+                manager.registerStudent(s);
+                NotificationThread.logMessage("[Student Desk] New Student registered: [" + id + "] " + name);
+                sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiUpdateStudentHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String id = (String) body.get("id");
+                String name = (String) body.get("name");
+                String dept = (String) body.get("department");
+                String email = (String) body.get("email");
+                String phone = (String) body.get("phone");
+
+                Student s = new Student(id, name, dept, email, phone);
+                manager.updateStudent(s);
+                NotificationThread.logMessage("[Student Desk] Student record updated: [" + id + "]");
+                sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiDeleteStudentHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String id = (String) body.get("id");
+                manager.deleteStudent(id);
+                NotificationThread.logMessage("[Student Desk] Student record removed: [" + id + "]");
+                sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiStudentHistoryHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            URI uri = exchange.getRequestURI();
+            String query = uri.getQuery();
+            String studentId = "";
+            if (query != null && query.startsWith("id=")) {
+                studentId = URLDecoder.decode(query.substring(3), StandardCharsets.UTF_8);
+            }
+
+            List<LoanRecord> history = manager.getLoansForStudent(studentId);
+            StringBuilder sb = new StringBuilder();
+            sb.append("Borrowing History for Student ID: ").append(studentId).append("\n\n");
+            if (history.isEmpty()) {
+                sb.append("No borrowing records found for this student.");
+            } else {
+                for (LoanRecord l : history) {
+                    sb.append(String.format("Loan %s | Book: %s | Issued: %s | Due: %s | Return: %s | Fine: ₹%.2f\n",
+                            l.getId(), l.getBookId(), l.getIssueDate(), l.getDueDate(),
+                            (l.getReturnDate() != null ? l.getReturnDate() : "STILL ACTIVE"),
+                            l.getFineAmount()));
+                }
+            }
+            sendResponse(exchange, 200, "{\"text\":\"" + escapeJson(sb.toString()) + "\"}", "application/json");
+        }
+    }
+
+    private class ApiIssueLoanHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String studentId = (String) body.get("studentId");
+                String bookId = (String) body.get("bookId");
+                LoanRecord loan = manager.issueBook(studentId, bookId, LocalDate.now());
+                NotificationThread.logMessage(String.format("[Circulation Desk] Book [%s] issued to [%s] under Loan %s",
+                        bookId, studentId, loan.getId()));
+                sendResponse(exchange, 200, String.format("{\"success\":true,\"loanId\":\"%s\",\"dueDate\":\"%s\"}",
+                        loan.getId(), loan.getDueDate()), "application/json");
+            } catch (BookUnavailableException | IllegalArgumentException ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiReturnLoanHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            Map<String, Object> body = parseJsonBody(exchange);
+            try {
+                String bookId = (String) body.get("bookId");
+                LoanRecord loan = manager.returnBook(bookId, LocalDate.now());
+                NotificationThread.logMessage(String.format("[Circulation Desk] Book [%s] returned. Assessed fine: ₹%.2f",
+                        bookId, loan.getFineAmount()));
+                sendResponse(exchange, 200, String.format("{\"success\":true,\"fine\":%.2f}", loan.getFineAmount()), "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"success\":false,\"error\":\"" + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiReportAuditHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String auditText = report.generateFullTextReport();
+            sendResponse(exchange, 200, "{\"output\":\"" + escapeJson(auditText) + "\"}", "application/json");
+        }
+    }
+
+    private class ApiReportCategoryHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            StringBuilder sb = new StringBuilder("=== BOOKS BY CATEGORY (Stream groupingBy) ===\n\n");
+            report.getBookCountByCategory().forEach((cat, cnt) -> {
+                sb.append(String.format("%-25s : %d copies\n", cat, cnt));
+            });
+            sb.append(String.format("\nAverage Publication Year of Catalog: %.1f\n",
+                    report.calculateAveragePublicationYear()));
+            sendResponse(exchange, 200, "{\"output\":\"" + escapeJson(sb.toString()) + "\"}", "application/json");
+        }
+    }
+
+    private class ApiReportBenchmarkHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            String result = report.benchmarkParallelVsSequentialStream();
+            sendResponse(exchange, 200, "{\"output\":\"" + escapeJson(result) + "\"}", "application/json");
+        }
+    }
+
+    private class ApiReportBackupHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            try {
+                File src = new File(manager.getFileHandler().getDataDirectory(), "books.txt");
+                File backup = new File(manager.getFileHandler().getDataDirectory(), "books_backup_raw_bytes.dat");
+                long bytes = manager.getFileHandler().createBinaryBackup(src, backup);
+                String msg = String.format(
+                        "=== 24CS202 UNIT III: BYTE STREAM BACKUP COMPLETED ===\n" +
+                        "Source File:      %s\n" +
+                        "Backup File:      %s\n" +
+                        "Bytes Copied:     %d bytes\n" +
+                        "Streams Utilized: FileInputStream & FileOutputStream with 4KB Byte Buffer",
+                        src.getAbsolutePath(), backup.getAbsolutePath(), bytes
+                );
+                sendResponse(exchange, 200, "{\"output\":\"" + escapeJson(msg) + "\"}", "application/json");
+            } catch (Exception ex) {
+                sendResponse(exchange, 200, "{\"output\":\"Backup failed: " + escapeJson(ex.getMessage()) + "\"}", "application/json");
+            }
+        }
+    }
+
+    private class ApiSyllabusDemoHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            URI uri = exchange.getRequestURI();
+            String query = uri.getQuery();
+            String unit = "all";
+            if (query != null && query.startsWith("unit=")) {
+                unit = query.substring(5).toLowerCase();
+            }
+
+            String output;
+            switch (unit) {
+                case "1" -> output = SyllabusDemo.demoUnit1PrimitivesAndArrays();
+                case "2" -> output = SyllabusDemo.demoUnit2StringsAndInnerClasses();
+                case "3" -> output = SyllabusDemo.demoUnit3ExceptionsAndByteStreams();
+                case "4" -> output = SyllabusDemo.demoUnit4ThreadsAndLambdas();
+                case "5" -> output = SyllabusDemo.demoUnit5CollectionsAndIterators();
+                default -> {
+                    output = SyllabusDemo.demoUnit1PrimitivesAndArrays() + "\n" +
+                             SyllabusDemo.demoUnit2StringsAndInnerClasses() + "\n" +
+                             SyllabusDemo.demoUnit3ExceptionsAndByteStreams() + "\n" +
+                             SyllabusDemo.demoUnit4ThreadsAndLambdas() + "\n" +
+                             SyllabusDemo.demoUnit5CollectionsAndIterators();
+                }
+            }
+            sendResponse(exchange, 200, "{\"output\":\"" + escapeJson(output) + "\"}", "application/json");
+        }
+    }
+
+    private class ApiClearNotificationsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            NotificationThread.clearNotificationHistory();
+            sendResponse(exchange, 200, "{\"success\":true}", "application/json");
+        }
+    }
+
+    // =========================================================================
+    // 3. UTILITY METHODS
+    // =========================================================================
+
+    private void sendResponse(HttpExchange exchange, int statusCode, String responseText, String contentType) throws IOException {
+        byte[] bytes = responseText.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", contentType + "; charset=UTF-8");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    private Map<String, Object> parseJsonBody(HttpExchange exchange) throws IOException {
+        Map<String, Object> map = new HashMap<>();
         try (InputStream in = exchange.getRequestBody()) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buf = new byte[1024];
@@ -810,37 +1881,61 @@ public class LibraryHttpServer {
             while ((read = in.read(buf)) != -1) {
                 out.write(buf, 0, read);
             }
-            String body = out.toString(StandardCharsets.UTF_8);
-            String[] pairs = body.split("&");
-            for (String pair : pairs) {
-                if (pair.isEmpty()) continue;
-                String[] kv = pair.split("=", 2);
-                String k = URLDecoder.decode(kv[0], StandardCharsets.UTF_8);
-                String v = kv.length > 1 ? URLDecoder.decode(kv[1], StandardCharsets.UTF_8) : "";
-                map.put(k, v);
+            String json = out.toString(StandardCharsets.UTF_8).trim();
+            if (json.startsWith("{") && json.endsWith("}")) {
+                json = json.substring(1, json.length() - 1);
+                // Simple JSON parser for single-level key-values
+                String[] tokens = json.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)");
+                for (String t : tokens) {
+                    String[] kv = t.split(":", 2);
+                    if (kv.length == 2) {
+                        String key = kv[0].trim().replaceAll("^\"|\"$", "");
+                        String rawVal = kv[1].trim();
+                        if (rawVal.startsWith("\"") && rawVal.endsWith("\"")) {
+                            map.put(key, rawVal.substring(1, rawVal.length() - 1));
+                        } else if ("true".equalsIgnoreCase(rawVal) || "false".equalsIgnoreCase(rawVal)) {
+                            map.put(key, Boolean.parseBoolean(rawVal));
+                        } else {
+                            try {
+                                if (rawVal.contains(".")) {
+                                    map.put(key, Double.parseDouble(rawVal));
+                                } else {
+                                    map.put(key, Integer.parseInt(rawVal));
+                                }
+                            } catch (Exception ex) {
+                                map.put(key, rawVal);
+                            }
+                        }
+                    }
+                }
             }
         }
         return map;
     }
 
-    private static String urlEncode(String val) {
-        if (val == null) return "";
-        return URLEncoder.encode(val, StandardCharsets.UTF_8);
-    }
-
-    private static String escapeHtml(String s) {
+    private static String escapeJson(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
-    }
-
-    private static String escapeJs(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\"", "\\\"");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < ' ') {
+                        String t = "000" + Integer.toHexString(c);
+                        sb.append("\\u").append(t.substring(t.length() - 4));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 }
